@@ -1,3 +1,37 @@
+local function registerSzCoreCallback(name, fn)
+    CreateThread(function()
+        local deadline = GetGameTimer() + 15000
+
+        while GetGameTimer() < deadline do
+            if GetResourceState('szcore') == 'started' then
+                local ok, success, err = pcall(function()
+                    return registerSzCoreCallback(name, fn)
+                end)
+
+                if ok and success ~= false then
+                    return
+                end
+
+                if ok and success == false then
+                    print(('[%s] SzCore callback registration rejected: %s (%s)'):format(
+                        GetCurrentResourceName(),
+                        tostring(name),
+                        tostring(err)
+                    ))
+                    return
+                end
+            end
+
+            Wait(100)
+        end
+
+        print(('[%s] SzCore callback registration timed out: %s'):format(
+            GetCurrentResourceName(),
+            tostring(name)
+        ))
+    end)
+end
+
 local state={};local helpRate={};local damageRate={}
 local function default()return{bleeding=0,pain=0,lastStand=false,dead=false,injuries={},downedAt=nil,deathAt=nil}end
 local function p(src)return exports.szcore:GetPlayer(src)end
@@ -61,14 +95,14 @@ RegisterNetEvent('szcore_death:requestHelp',function()
     local src=source;local now=os.time();if helpRate[src]and now-helpRate[src]<SzCoreMedicalConfig.helpCooldownSeconds then return end;helpRate[src]=now
     local ped=GetPlayerPed(src);local c=GetEntityCoords(ped);local q=p(src);for _,sid in ipairs(exports.szcore:GetPlayerSourcesByJob('ambulance',true))do TriggerClientEvent('szcore_death:emsAlert',sid,{source=src,name=q and q.PlayerData.name or('ID '..src),x=c.x,y=c.y,z=c.z})end
 end)
-exports.szcore:CreateCallback('szcore_death:respawn',function(source)return respawn(source)end)
-exports.szcore:CreateCallback('szcore_death:get',function(source)return load(source)end)
+registerSzCoreCallback('szcore_death:respawn',function(source)return respawn(source)end)
+registerSzCoreCallback('szcore_death:get',function(source)return load(source)end)
 local function emsAllowed(src,target)
     local q=p(src);target=tonumber(target);if not q or not target or q.PlayerData.job.name~='ambulance' or not q.PlayerData.job.onduty then return nil,'no_permission' end
     if not exports.szcore:ValidateDistance(src,target,3.5) then return nil,'too_far' end
     return q
 end
-exports.szcore:CreateCallback('szcore_death:emsStatus',function(source,target)local q,err=emsAllowed(source,target);if not q then return nil,err end;return load(tonumber(target))end)
+registerSzCoreCallback('szcore_death:emsStatus',function(source,target)local q,err=emsAllowed(source,target);if not q then return nil,err end;return load(tonumber(target))end)
 local treatments={}
 local treatmentDefs={bandage={item='bandage',ms=3500},medkit={item='medkit',ms=5500},firstaid={item='firstaid',ms=8000},heal={item='bandage',ms=4500},revive={item='firstaid',ms=8000}}
 local function beginTreatment(src,target,kind)
@@ -95,8 +129,8 @@ local function finishTreatment(src,target,kind)
     if kind=='firstaid' or kind=='revive' then return revive(target,150) end
     return heal(target,kind=='heal' and 'bandage' or kind)
 end
-exports.szcore:CreateCallback('szcore_death:beginTreatment',beginTreatment)
-exports.szcore:CreateCallback('szcore_death:emsTreat',function(src,target,kind)return finishTreatment(src,target,kind)end)
+registerSzCoreCallback('szcore_death:beginTreatment',beginTreatment)
+registerSzCoreCallback('szcore_death:emsTreat',function(src,target,kind)return finishTreatment(src,target,kind)end)
 exports('GetMedicalState',load);exports('GetInjuries',function(src)local s=load(src);return s and s.injuries or{}end);exports('Heal',heal);exports('Revive',revive);exports('Kill',kill);exports('Respawn',function(src,coords)if coords then local s=load(src);if s then s.dead=false;s.lastStand=false;s.bleeding=0;s.pain=0;s.injuries={};sync(src);TriggerClientEvent('szcore_death:respawn',src,coords,0);return true end end;return respawn(src)end)
 CreateThread(function()
     while GetResourceState('szcore_inventory')~='started'do Wait(500)end
